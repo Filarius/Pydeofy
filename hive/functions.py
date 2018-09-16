@@ -5,7 +5,7 @@ from time import sleep
 from hive import fifo
 
 from reedsolo import RSCodec
-
+import itertools
 
 coder = RSCodec(2)
 
@@ -193,7 +193,7 @@ def IDCT4x4(data):
         d[3 * 4 + i] = ((s02 - s13 + 32) >> 6)
     d = d.clip(0,255)
     return d
-'''
+
 def  DCT8x8(data):
     tmp = np.zeros((64,),dtype=np.int32)
     result = np.zeros((64,),dtype=np.int32)
@@ -263,7 +263,8 @@ def  DCT8x8(data):
         result[5 * 8 + i] = b6 - (b5 >> 2)
         result[6 * 8 + i] = (b2 >> 1) - b3
         result[7 * 8 + i] = (b4 >> 2) - b7
-    return result'''
+    return result
+'''
 def  DCT8x8(data):
 
     tmp = np.zeros((64,),dtype=np.int32)
@@ -336,86 +337,90 @@ def  DCT8x8(data):
         result[7 * 8 + i] = (a4 >> 2) - a7
     return result
 
+'''
 
-
-'''def IDCT8x8(data):
-    tmp = np.zeros((64,), dtype=np.int32)
-    result = np.zeros((64,), dtype=np.int32)
-    for i in range(8):
-        p0 = data[i * 8 + 0]
-        p1 = data[i * 8 + 1]
-        p2 = data[i * 8 + 2]
-        p3 = data[i * 8 + 3]
-        p4 = data[i * 8 + 4]
-        p5 = data[i * 8 + 5]
-        p6 = data[i * 8 + 6]
-        p7 = data[i * 8 + 7]
-        a0 = p0 + p4
-        a1 = p0 - p4
-        a2 = p6 - (p2 >> 1)
-        a3 = p2 + (p6 >> 1)
-        b0 = a0 + a3
-        b2 = a1 - a2
-        b4 = a1 + a2
-        b6 = a0 - a3
-        a0 = -p3 + p5 - p7 - (p7 >> 1)
-        a1 = p1 + p7 - p3 - (p3 >> 1)
-        a2 = -p1 + p7 + p5 + (p5 >> 1)
-        a3 = p3 + p5 + p1 + (p1 >> 1)
-        b1 = a0 + (a3 >> 2)
-        b3 = a1 + (a2 >> 2)
-        b5 = a2 - (a1 >> 2)
-        b7 = a3 - (a0 >> 2)
-        tmp[i * 8 + 0] = b0 + b7
-        tmp[i * 8 + 1] = b2 - b5
-        tmp[i * 8 + 2] = b4 + b3
-        tmp[i * 8 + 3] = b6 + b1
-        tmp[i * 8 + 4] = b6 - b1
-        tmp[i * 8 + 5] = b4 - b3
-        tmp[i * 8 + 6] = b2 + b5
-        tmp[i * 8 + 7] = b0 - b7
-    for i in range(8):
-        p0 = tmp[0 * 8 + i]
-        p1 = tmp[1 * 8 + i]
-        p2 = tmp[2 * 8 + i]
-        p3 = tmp[3 * 8 + i]
-        p4 = tmp[4 * 8 + i]
-        p5 = tmp[5 * 8 + i]
-        p6 = tmp[6 * 8 + i]
-        p7 = tmp[7 * 8 + i]
-        a0 = p0 + p4
-        a1 = p0 - p4
-        a2 = p6 - (p2 >> 1)
-        a3 = p2 + (p6 >> 1)
-        b0 = a0 + a3
-        b2 = a1 - a2
-        b4 = a1 + a2
-        b6 = a0 - a3
-        a0 = -p3 + p5 - p7 - (p7 >> 1)
-        a1 = p1 + p7 - p3 - (p3 >> 1)
-        a2 = -p1 + p7 + p5 + (p5 >> 1)
-        a3 = p3 + p5 + p1 + (p1 >> 1)
-        b1 = a0 + (a3 >> 2)
-        b7 = a3 - (a0 >> 2)
-        b3 = a1 + (a2 >> 2)
-        b5 = a2 - (a1 >> 2)
-        result[0 * 8 + i] = ((b0 + b7) >> 6)
-        result[1 * 8 + i] = ((b2 - b5) >> 6)
-        result[2 * 8 + i] = ((b4 + b3) >> 6)
-        result[3 * 8 + i] = ((b6 + b1) >> 6)
-        result[4 * 8 + i] = ((b6 - b1) >> 6)
-        result[5 * 8 + i] = ((b4 - b3) >> 6)
-        result[6 * 8 + i] = ((b2 + b5) >> 6)
-        result[7 * 8 + i] = ((b0 - b7) >> 6)
-    result = result.clip(0,255)
-    return result
-    '''
 def IDCT8x8(data):
-    data[0] = data[0] +  32 # rounding for the >> 6 at the end
     tmp = np.zeros((64,), dtype=np.int32)
     result = np.zeros((64,), dtype=np.int32)
     for i in range(8):
         p0 = data[i * 8 + 0]
+        if i == 0:
+            #p0 = p0 + 32
+            pass
+        p1 = data[i * 8 + 1]
+        p2 = data[i * 8 + 2]
+        p3 = data[i * 8 + 3]
+        p4 = data[i * 8 + 4]
+        p5 = data[i * 8 + 5]
+        p6 = data[i * 8 + 6]
+        p7 = data[i * 8 + 7]
+        a0 = p0 + p4
+        a1 = p0 - p4
+        a2 = p6 - (p2 >> 1)
+        a3 = p2 + (p6 >> 1)
+        b0 = a0 + a3
+        b2 = a1 - a2
+        b4 = a1 + a2
+        b6 = a0 - a3
+        a0 = -p3 + p5 - p7 - (p7 >> 1)
+        a1 = p1 + p7 - p3 - (p3 >> 1)
+        a2 = -p1 + p7 + p5 + (p5 >> 1)
+        a3 = p3 + p5 + p1 + (p1 >> 1)
+        b1 = a0 + (a3 >> 2)
+        b3 = a1 + (a2 >> 2)
+        b5 = a2 - (a1 >> 2)
+        b7 = a3 - (a0 >> 2)
+        tmp[i * 8 + 0] = b0 + b7
+        tmp[i * 8 + 1] = b2 - b5
+        tmp[i * 8 + 2] = b4 + b3
+        tmp[i * 8 + 3] = b6 + b1
+        tmp[i * 8 + 4] = b6 - b1
+        tmp[i * 8 + 5] = b4 - b3
+        tmp[i * 8 + 6] = b2 + b5
+        tmp[i * 8 + 7] = b0 - b7
+    for i in range(8):
+        p0 = tmp[0 * 8 + i]
+        p1 = tmp[1 * 8 + i]
+        p2 = tmp[2 * 8 + i]
+        p3 = tmp[3 * 8 + i]
+        p4 = tmp[4 * 8 + i]
+        p5 = tmp[5 * 8 + i]
+        p6 = tmp[6 * 8 + i]
+        p7 = tmp[7 * 8 + i]
+        a0 = p0 + p4
+        a1 = p0 - p4
+        a2 = p6 - (p2 >> 1)
+        a3 = p2 + (p6 >> 1)
+        b0 = a0 + a3
+        b2 = a1 - a2
+        b4 = a1 + a2
+        b6 = a0 - a3
+        a0 = -p3 + p5 - p7 - (p7 >> 1)
+        a1 = p1 + p7 - p3 - (p3 >> 1)
+        a2 = -p1 + p7 + p5 + (p5 >> 1)
+        a3 = p3 + p5 + p1 + (p1 >> 1)
+        b1 = a0 + (a3 >> 2)
+        b7 = a3 - (a0 >> 2)
+        b3 = a1 + (a2 >> 2)
+        b5 = a2 - (a1 >> 2)
+        result[0 * 8 + i] = ((b0 + b7) >> 6)
+        result[1 * 8 + i] = ((b2 - b5) >> 6)
+        result[2 * 8 + i] = ((b4 + b3) >> 6)
+        result[3 * 8 + i] = ((b6 + b1) >> 6)
+        result[4 * 8 + i] = ((b6 - b1) >> 6)
+        result[5 * 8 + i] = ((b4 - b3) >> 6)
+        result[6 * 8 + i] = ((b2 + b5) >> 6)
+        result[7 * 8 + i] = ((b0 - b7) >> 6)
+    result = result.clip(0,255)
+    return result
+'''
+def IDCT8x8(data):
+    tmp = np.zeros((64,), dtype=np.int32)
+    result = np.zeros((64,), dtype=np.int32)
+    for i in range(8):
+        p0 = data[i * 8 + 0]
+        if i == 0:
+            p0 = p0 + 32
         p1 = data[i * 8 + 1]
         p2 = data[i * 8 + 2]
         p3 = data[i * 8 + 3]
@@ -482,7 +487,7 @@ def IDCT8x8(data):
         result[7 * 8 + i] = ((b0 - b7) >> 6)
     result = result.clip(0,255)
     return result
-
+'''
 def blocks_to_yuv(data,w,h):
     assert (len(data) % w*h) == 0
     assert w % 8 == 0
@@ -529,6 +534,12 @@ def yuv_to_blocks(data,w,h):
         z = z + w*h
     return result
 
+'''
+    cell_size - maximum count of values of cell
+    cell_count - count of cells
+    
+    :return (average dc, max ac)
+'''
 def dct_core_init8(cell_size, cell_count):
     t = np.ones((64,),dtype=np.int32)
     t = t * 128
@@ -536,16 +547,29 @@ def dct_core_init8(cell_size, cell_count):
     t = IDCT8x8(t)
     t = DCT8x8(t)
     middle = t[0]
-    a = np.zeros((64,),dtype=np.uint8)
+    a = np.zeros((64,),dtype=np.int32)
     a[0] = middle
     i = 1
     lastmax = 0
     while True:
         for j in range(1,cell_count+1):
             a[j] = i
-        b = DCT8x8(a)
+
+        b = IDCT8x8(a)
+        '''
+        a2 = DCT8x8(b)
+        b2 = IDCT8x8(a2)
+        a3 = DCT8x8(b2)
+        b3 = IDCT8x8(a3)
+        a4 = DCT8x8(b3)
+        b4 = IDCT8x8(a4)
+        '''
         max = np.amax(b)
-        if max > 255:
+        min = np.amin(b)
+
+        if max == 255:
+            break
+        if min == 0:
             break
         i = i + 1
     max = i - 1
@@ -556,9 +580,41 @@ def dct_core_init8(cell_size, cell_count):
         i = i * 2
         max = max // 2
         j = j + 1
-    assert j >= cell_size
-    max = i
-    return max
+    if  j >= cell_size:
+        max = i
+        return (middle, max)
+    else:
+        return None
+
+def cell_to_core(cell,size,core):
+    return cell * 2 * core // (size-1)  - core
+
+np_dct = np.zeros((64,),dtype=np.int32)
+for count in range(1,64):
+    for size in [2,4,8,16]:
+        t = dct_core_init8(size, count)
+        if t == None:
+            continue
+        middle, core = t
+        np_dct.fill(0)
+        np_dct[0] = middle
+        for variant in itertools.permutations(range(size), count):
+            _ = list(map(lambda x: cell_to_core(x,size,core), variant))
+            np_dct[1:1+count] = _[:]
+            np_idct = IDCT8x8(np_dct)
+            np_dct_2 = DCT8x8(np_idct)
+            np_idct = IDCT8x8(np_dct_2)
+            np_dct_2 = DCT8x8(np_idct)
+            np_idct = IDCT8x8(np_dct_2)
+            np_dct_2 = DCT8x8(np_idct)
+            np_idct = IDCT8x8(np_dct_2)
+            np_dct_2 = DCT8x8(np_idct)
+            np_idct = IDCT8x8(np_dct_2)
+            np_dct_2 = DCT8x8(np_idct)
+            np_idct = IDCT8x8(np_dct_2)
+            np_dct_2 = DCT8x8(np_idct)
+
+
 
 
 
