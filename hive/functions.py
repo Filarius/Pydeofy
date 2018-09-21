@@ -1,9 +1,11 @@
 import numpy as np
+import sys
 import multiprocessing
 import io
 from time import sleep
 from hive import fifo
-
+from math import ceil
+from scipy.fftpack import dctn,idctn
 from reedsolo import RSCodec
 import itertools
 
@@ -28,12 +30,12 @@ def  bits_to_bytes(arr):
     arr = np.array(arr)
     return np.packbits(arr).tobytes()
 
-def  bits_to_cell(arr,size):
+def  bits_to_cell(arr,size,dtype=np.uint8):
     if (len(arr) % size) != 0:
         raise AttributeError
     if size > 8:
         raise AttributeError
-    t = bytearray(len(arr) // size)
+    t = np.zeros(len(arr) // size,dtype=dtype)
 
     k = 0
     i = 0
@@ -46,7 +48,7 @@ def  bits_to_cell(arr,size):
             t[j] = k
             j = j + 1
             k = 0
-    return bytes(t)
+    return t
 
 def cell_to_bits(arr,size):
     i = 0
@@ -494,13 +496,22 @@ def blocks_to_yuv(data,w,h):
     assert h % 8 == 0
     result = np.zeros((len(data)+ len(data)//2,),dtype=np.uint8)
     z = zr = 0
+    print(len(data))
     while (z < len(data)):
-        x = y = 0
+        y = 0
+        x = 0
         yr = xr = 0
-        while (x*w + y) < (w*h):
+        while (y < h):#and(z+xr < len(data)):
             while(x < w):
                 i = 0
+                #print('i loop')
                 while i<8:
+                    #print("--")
+                    #print(result[zr + (y+i)*w + x : zr + (y+i)*w + x + 8])
+                    #print(data[z + xr: z + xr + 8])
+                    #print(f"i {i} x {x} y {y} z+xr {z+xr}" )
+                    i1 = zr + (y+i)*w + x
+                    i2 = z + xr
                     result[zr + (y+i)*w + x : zr + (y+i)*w + x + 8] = data[z + xr: z + xr + 8]
                     i = i + 1
                     xr = xr + 8
@@ -521,6 +532,7 @@ def yuv_to_blocks(data,w,h):
         x = y = 0
         yr = xr = 0
         while (x*w + y) < (w*h):
+            x = 0
             while(x < w):
                 i = 0
                 while i<8:
@@ -528,7 +540,7 @@ def yuv_to_blocks(data,w,h):
                     i = i + 1
                     xr = xr + 8
                 x = x + 8
-            x = 0
+
             y = y + 8
         zr = zr + w*h + w*h//2
         z = z + w*h
@@ -589,59 +601,77 @@ def dct_core_init8(cell_size, cell_count):
 def cell_to_core(cell,size,core):
     return cell * 2 * core // (size-1)  - core
 
-np_dct = np.zeros((64,),dtype=np.int32)
-for count in range(1,64):
-    for size in [2,4,8,16]:
-        t = dct_core_init8(size, count)
-        if t == None:
-            continue
-        middle, core = t
-        np_dct.fill(0)
-        np_dct[0] = middle
-        for variant in itertools.permutations(range(size), count):
-            _ = list(map(lambda x: cell_to_core(x,size,core), variant))
-            np_dct[1:1+count] = _[:]
-            np_idct = IDCT8x8(np_dct)
-            np_dct_2 = DCT8x8(np_idct)
-            np_idct = IDCT8x8(np_dct_2)
-            np_dct_2 = DCT8x8(np_idct)
-            np_idct = IDCT8x8(np_dct_2)
-            np_dct_2 = DCT8x8(np_idct)
-            np_idct = IDCT8x8(np_dct_2)
-            np_dct_2 = DCT8x8(np_idct)
-            np_idct = IDCT8x8(np_dct_2)
-            np_dct_2 = DCT8x8(np_idct)
-            np_idct = IDCT8x8(np_dct_2)
-            np_dct_2 = DCT8x8(np_idct)
+def cell_to_dct(data,size,core):
+    result = np.array(data,dtype=np.int32)
+    result = result[:] * 2 * core
+    result = result[:] // ( (1 << (size-1)))
+    result = result[:] - core
+    return result
 
+def dct_to_cell(data,size,core):
+    result = np.array(data, dtype=np.float32)
+    result = result[:] + core
+    result = result[:] *  ( (1 << (size-1)))
+    result = result[:] / (2 * core)
+    result = np.clip(result,0,size-1)
+    result = np.round(result)
+    result = result.astype(np.int32)
+    return result
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+def dct_to_block(data, core_middle, count):
+    result = np.zeros((data.shape[0]*64//count), dtype=np.uint8)
+    dct = np.zeros((data.shape[0]*64//count), dtype=np.int32)
+    assert (len(data) % count) == 0
+    for i in range(len(data)//count):
+        dct[0] = core_middle
+        result[64 * i] = core_middle
+        for j in range(count):
+            ii = i*count + j
+            iii = 64*i+j+1
+            result[64*i+j+1] = data[i*count + j]
+            dct[j+1] = data[i*count + j]
+        block = IDCT8x8(dct)
+        result[64*i:64*i+64] = block[:]
+    return result
 
 
 
 
 '''
-q = np.zeros((16,),dtype=np.int16)
-q[0]=200
-a = IDCT4x4(q)
-a = DCT4x4(a)
-a = IDCT4x4(a)
-a = DCT4x4(a)
-a = IDCT4x4(a)
-a = DCT4x4(a)'''
+generate possible modes
+
+:return list of dict 
+  count - count of dct coefficients 
+  size - "alphabet" size
+  volume - total data per dct block
+'''
+def generate_dct_modes_list():
+    modes = []
+    cnt = 0
+    print("Generating possible modes:")
+    np_dct = np.empty((64,),dtype=np.int16)
+    for count in range(1, 64):
+        for size in [2, 4, 8, 16]:
+            t = dct_core_init8(size, count)
+            if t is None:
+                continue
+            middle, core = t
+            np_dct.fill(0)
+            np_dct[0] = middle
+            flag = True
+            for variant in itertools.permutations(range(size), count):
+                _ = list(map(lambda x: cell_to_core(x, size, core), variant))
+                __ = cell_to_dct(variant, size, core)
+                np_dct[1:1 + count] = __[:]
+                np_idct = IDCT8x8(np_dct)
+                np_dct2 = DCT8x8(np_idct)
+                variant_2 = dct_to_cell(np_dct2[1:1 + count], size, core)
+                if not (variant == variant_2).all():
+                    flag = False
+                    break
+            if flag:
+                print(f" count={count}  size={size}  volume={count*size}")
+                modes.append({'count': count, 'size': size, 'volume':count*size})
 
 
 
@@ -655,7 +685,7 @@ class Feeder:
        self._is_open = True
        self._dtype = dtype
 
-    def __iter__(self):
+    def iter(self):
         while self._is_open:
             if self._size >= self._chunk_size:
                 size = ( self._size // self._chunk_size) * self._chunk_size
@@ -681,14 +711,19 @@ class Feeder:
                 pass
 
         #after Feeder closed - flush all data with padding zeros
-        size = (self._size // self._chunk_size) * self._chunk_size
-        if (self._size % self._chunk_size) > 0:
-            size = size + self._chunk_size
-        buf = np.zeros((size,), dtype=self._dtype)
-        i = 0
-        for data in self._list:
-            buf[i:i+len(data)] = data[:]
-        yield buf
+        if self._size > 0:
+            size = (self._size // self._chunk_size) * self._chunk_size
+            if (self._size % self._chunk_size) > 0:
+                size = size + self._chunk_size
+            buf = np.zeros((size,), dtype=self._dtype)
+            i = 0
+            for data in self._list:
+                buf[i:i+len(data)] = data[:]
+                test = data[:]
+                buf[i:i + len(data)] = test[:]
+            self._list = []
+            self._size = 0
+            yield buf
 
     def push(self,data):
         self._list.append(data)
@@ -704,11 +739,75 @@ class Feeder:
             return self._size > 0
 
 
+'''
+y = np.random.randn(16, 16)*50
+y = y.astype(dtype=np.uint8)
+ydct = dctn(y, norm='ortho')
+yidct = idctn(ydct,norm='ortho')
 
-a = np.arange(0,25,dtype=np.uint8)
-core = dct_core_init8()
+print(np.allclose( y, idctn(dctn(y, norm='ortho'), norm='ortho')) )
+'''
+def array_print(data,x):
+    f = open(f"test {x}.txt","w")
+    for i in range(len(data)):
+        f.write(f"{i}  {data[i]}\n")
+    f.close()
+
+a = np.arange(255,dtype=np.uint8)
+#a.tofile('test',format("bw"))
 
 
+
+cells_per_block = 1
+cells_size = 1
+w = 8*2
+h = 8*2
+yuv_size = w*h + w*h//2
+middle, core_val = dct_core_init8(cells_size,cells_per_block)
+
+#data = np.arange(0,255,dtype=np.uint8)
+data = np.zeros((3,),dtype=np.uint8)
+data[0] = 170
+data[1] = 256-170
+data[2] = 212
+data = np.tile(data,500)
+data = bytes_to_bits(data)
+
+buf = Feeder(cells_size)
+buf.push(data)
+buf.close()
+data = bits_to_cell(next(buf.iter()),cells_size)
+
+data = cell_to_dct(data,cells_size,core_val)
+
+array_print(data,'7dct')
+
+buf = Feeder(cells_per_block,dtype=np.int32)
+buf.push(data)
+buf.close()
+data = dct_to_block(next(buf.iter()), middle, cells_per_block)
+
+array_print(data,'8block')
+
+buf = Feeder( w*h )
+buf.push(data)
+buf.close()
+
+data = next(buf.iter())
+array_print(data,'80block')
+
+data = blocks_to_yuv(data,w,h)
+
+
+f = open('text','bw')
+f.write(memoryview(data))
+f.close()
+
+array_print(data,'9end')
+
+
+
+z = 2
 
 '''class Buffer():
 
@@ -749,5 +848,4 @@ core = dct_core_init8()
         else:
             return self.read(size)
 '''
-
 
