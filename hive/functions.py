@@ -7,16 +7,21 @@ from hive import fifo
 from math import ceil
 from scipy.fftpack import dctn,idctn
 from reedsolo import RSCodec
+from array import array
 import itertools
 
-coder = RSCodec(2)
+coder = RSCodec(50)
 
 s = bytearray(255)
 s = coder.encode(s)
 print(len(s))
 a = 2
 
+def bytes_to_rs(data):
+    return  coder.encode(data.tobytes())
 
+def bytes_from_rs(data):
+    return np.array(coder.decode(data),dtype=np.uint8)
 
 
 def bytes_to_bits(arr):
@@ -28,7 +33,7 @@ def  bits_to_bytes(arr):
     if (len(arr) % 8) != 0:
         raise AttributeError
     arr = np.array(arr)
-    return np.packbits(arr).tobytes()
+    return np.packbits(arr)
 
 def  bits_to_cell(arr,size,dtype=np.uint8):
     if (len(arr) % size) != 0:
@@ -52,7 +57,8 @@ def  bits_to_cell(arr,size,dtype=np.uint8):
 
 def cell_to_bits(arr,size):
     i = 0
-    t = bytearray(len(arr) * size)
+    #t = bytearray(len(arr) * size)
+    t = np.zeros(len(arr) * size,dtype=np.uint8)
     j = 0
     k = arr[i]
     s = size - 1
@@ -61,7 +67,6 @@ def cell_to_bits(arr,size):
         t[j+s] = k % 2
         k = k // 2
         s = s - 1
-
         if s == -1:
             s = size - 1
             j = j + size
@@ -70,8 +75,6 @@ def cell_to_bits(arr,size):
                 break
             k = arr[i]
             q = k
-
-
     return t
 
 
@@ -101,7 +104,20 @@ _snake_encode8 = [
 (7,7)
 ]
 
-_snake_encode8_plain = [x + y*8 for x,y in _snake_encode8]
+_snake_encode8_plain = [x + y*8 for y,x in _snake_encode8]
+_snake_encode8_plain_np = np.empty(64,dtype=np.uint8)
+for i,x in enumerate(_snake_encode8_plain):
+    _snake_encode8_plain_np[x] = i
+_snake_decode8_plain_np = np.zeros(64,dtype=np.uint8)
+for i,x in enumerate(_snake_encode8_plain_np):
+    _snake_decode8_plain_np[x] = i
+
+'''
+a = np.arange(0,64)
+b = a[_snake_encode8_plain_np]
+c = b[_snake_decode8_plain_np]
+d = 1
+'''
 
 _snake_encode4 = [(0,0),
 (0,1),(1,0),
@@ -113,7 +129,7 @@ _snake_encode4 = [(0,0),
 ]
 
 _snake_encode4_plain = [x + y*4 for x,y in _snake_encode4]
-
+_snake_encode4_plain_np = np.array(_snake_encode4_plain)
 #def YFrameTo
 
 
@@ -131,6 +147,20 @@ def snake_unpack8(arr):
             j += 1
         i += 64
     return temp
+
+def snake_pack8_np(data):
+    assert (data.shape[0] == 64)
+    result = np.empty(data.shape,dtype=np.int32)
+    for i in range(len(data)//64):
+        result[i*64:i*64+63] = data[i*64:i*64+64][_snake_encode8_plain_np]
+    return result
+
+def snake_unpack8_np(data):
+    assert (data.shape[0] % 64) == 0
+    result = np.empty(data.shape,dtype=np.int32)
+    for i in range(len(data)//64):
+        result[i*64:i*64+63] = data[i*64:i*64+64][_snake_decode8_plain_np]
+    return result
 
 def snake_pack8(arr):
     assert  (arr.shape[0] % 64) == 0
@@ -200,14 +230,15 @@ def  DCT8x8(data):
     tmp = np.zeros((64,),dtype=np.int32)
     result = np.zeros((64,),dtype=np.int32)
     for i in range(8):
-        p0 = data[i * 8 + 0]
-        p1 = data[i * 8 + 1]
-        p2 = data[i * 8 + 2]
-        p3 = data[i * 8 + 3]
-        p4 = data[i * 8 + 4]
-        p5 = data[i * 8 + 5]
-        p6 = data[i * 8 + 6]
-        p7 = data[i * 8 + 7]
+        #cast byte to int to bepass error "overflow encountered in ubyte_scalars"
+        p0 = int(data[i * 8 + 0])
+        p1 = int(data[i * 8 + 1])
+        p2 = int(data[i * 8 + 2])
+        p3 = int(data[i * 8 + 3])
+        p4 = int(data[i * 8 + 4])
+        p5 = int(data[i * 8 + 5])
+        p6 = int(data[i * 8 + 6])
+        p7 = int(data[i * 8 + 7])
         a0 = p0 + p7
         a1 = p1 + p6
         a2 = p2 + p5
@@ -266,20 +297,19 @@ def  DCT8x8(data):
         result[6 * 8 + i] = (b2 >> 1) - b3
         result[7 * 8 + i] = (b4 >> 2) - b7
     return result
-'''
-def  DCT8x8(data):
 
+def  DCT8x8x264(data):
     tmp = np.zeros((64,),dtype=np.int32)
     result = np.zeros((64,),dtype=np.int32)
     for i in range(8):
-        p0 = data[i * 8 + 0]
-        p1 = data[i * 8 + 1]
-        p2 = data[i * 8 + 2]
-        p3 = data[i * 8 + 3]
-        p4 = data[i * 8 + 4]
-        p5 = data[i * 8 + 5]
-        p6 = data[i * 8 + 6]
-        p7 = data[i * 8 + 7]
+        p0 = int(data[i * 8 + 0])
+        p1 = int(data[i * 8 + 1])
+        p2 = int(data[i * 8 + 2])
+        p3 = int(data[i * 8 + 3])
+        p4 = int(data[i * 8 + 4])
+        p5 = int(data[i * 8 + 5])
+        p6 = int(data[i * 8 + 6])
+        p7 = int(data[i * 8 + 7])
         s07 = p0 + p7
         s16 = p1 + p6
         s25 = p2 + p5
@@ -292,18 +322,18 @@ def  DCT8x8(data):
         d16 = p1 - p6
         d25 = p2 - p5
         d34 = p3 - p4
-        a4 = d16 + d25 + (d07 + (d07 >> 1))
-        a5 = d07 - d34 - (d25 + (d25 >> 1))
-        a6 = d07 + d34 - (d16 + (d16 >> 1))
-        a7 = d16 - d25 + (d34 + (d34 >> 1))
+        a4 = d16 + d25 + (d07 + (d07>>1))
+        a5 = d07 - d34 - (d25 + (d25>>1))
+        a6 = d07 + d34 - (d16 + (d16>>1))
+        a7 = d16 - d25 + (d34 + (d34>>1))
         tmp[i * 8 + 0] = a0 + a1
-        tmp[i * 8 + 1] = a4 + (a7 >> 2)
-        tmp[i * 8 + 2] = a2 + (a3 >> 1)
-        tmp[i * 8 + 3] = a5 + (a6 >> 2)
+        tmp[i * 8 + 1] = a4 + (a7>>2)
+        tmp[i * 8 + 2] = a2 + (a3>>1)
+        tmp[i * 8 + 3] = a5 + (a6>>2)
         tmp[i * 8 + 4] = a0 - a1
-        tmp[i * 8 + 5] = a6 - (a5 >> 2)
-        tmp[i * 8 + 6] = (a2 >> 1) - a3
-        tmp[i * 8 + 7] = (a4 >> 2) - a7
+        tmp[i * 8 + 5] = a6 - (a5>>2)
+        tmp[i * 8 + 6] = (a2>>1) - a3
+        tmp[i * 8 + 7] = (a4>>2) - a7
     for i in range(8):
         p0 = tmp[0 * 8 + i]
         p1 = tmp[1 * 8 + i]
@@ -338,8 +368,6 @@ def  DCT8x8(data):
         result[6 * 8 + i] = (a2 >> 1) - a3
         result[7 * 8 + i] = (a4 >> 2) - a7
     return result
-
-'''
 
 def IDCT8x8(data):
     tmp = np.zeros((64,), dtype=np.int32)
@@ -415,44 +443,45 @@ def IDCT8x8(data):
         result[7 * 8 + i] = ((b0 - b7) >> 6)
     result = result.clip(0,255)
     return result
-'''
-def IDCT8x8(data):
+
+def IDCT8x8x264(data):
     tmp = np.zeros((64,), dtype=np.int32)
     result = np.zeros((64,), dtype=np.int32)
     for i in range(8):
-        p0 = data[i * 8 + 0]
+        p0 = int(data[i * 8 + 0])
         if i == 0:
-            p0 = p0 + 32
-        p1 = data[i * 8 + 1]
-        p2 = data[i * 8 + 2]
-        p3 = data[i * 8 + 3]
-        p4 = data[i * 8 + 4]
-        p5 = data[i * 8 + 5]
-        p6 = data[i * 8 + 6]
-        p7 = data[i * 8 + 7]
+            #p0 = p0 + 32
+            pass
+        p1 = int(data[i * 8 + 1])
+        p2 = int(data[i * 8 + 2])
+        p3 = int(data[i * 8 + 3])
+        p4 = int(data[i * 8 + 4])
+        p5 = int(data[i * 8 + 5])
+        p6 = int(data[i * 8 + 6])
+        p7 = int(data[i * 8 + 7])
         a0 = p0 + p4
         a2 = p0 - p4
-        a4 = (p2 >> 1) - p6
-        a6 = (p6 >> 1) + p2
+        a4 = (p2>>1) - p6
+        a6 = (p6>>1) + p2
         b0 = a0 + a6
         b2 = a2 + a4
         b4 = a2 - a4
         b6 = a0 - a6
-        a1 = -p3 + p5 - p7 - (p7 >> 1)
-        a3 = p1 + p7 - p3 - (p3 >> 1)
-        a5 = -p1 + p7 + p5 + (p5 >> 1)
-        a7 = p3 + p5 + p1 + (p1 >> 1)
-        b1 = (a7 >> 2) + a1
-        b3 = a3 + (a5 >> 2)
-        b5 = (a3 > 2) - a5
-        b7 = a7 - (a1 >> 2)
+        a1 = -p3 + p5 - p7 - (p7>>1)
+        a3 =  p1 + p7 - p3 - (p3>>1)
+        a5 = -p1 + p7 + p5 + (p5>>1)
+        a7 =  p3 + p5 + p1 + (p1>>1)
+        b1 = (a7>>2) + a1
+        b3 = a3 + (a5>>2)
+        b5 = (a3>>2) - a5
+        b7 = a7 - (a1>>2)
         tmp[i * 8 + 0] = b0 + b7
-        tmp[i * 8 + 1] = b2 - b5
+        tmp[i * 8 + 1] = b2 + b5
         tmp[i * 8 + 2] = b4 + b3
         tmp[i * 8 + 3] = b6 + b1
         tmp[i * 8 + 4] = b6 - b1
         tmp[i * 8 + 5] = b4 - b3
-        tmp[i * 8 + 6] = b2 + b5
+        tmp[i * 8 + 6] = b2 - b5
         tmp[i * 8 + 7] = b0 - b7
     for i in range(8):
         p0 = tmp[0 * 8 + i]
@@ -477,19 +506,19 @@ def IDCT8x8(data):
         a7 = p3 + p5 + p1 + (p1 >> 1)
         b1 = (a7 >> 2) + a1
         b3 = a3 + (a5 >> 2)
-        b5 = (a3 > 2) - a5
+        b5 = (a3 >> 2) - a5
         b7 = a7 - (a1 >> 2)
-        result[0 * 8 + i] = ((b0 + b7) >> 6)
-        result[1 * 8 + i] = ((b2 - b5) >> 6)
-        result[2 * 8 + i] = ((b4 + b3) >> 6)
-        result[3 * 8 + i] = ((b6 + b1) >> 6)
-        result[4 * 8 + i] = ((b6 - b1) >> 6)
-        result[5 * 8 + i] = ((b4 - b3) >> 6)
-        result[6 * 8 + i] = ((b2 + b5) >> 6)
-        result[7 * 8 + i] = ((b0 - b7) >> 6)
+        result[0 * 8 + i] = (b0 + b7)>>6
+        result[1 * 8 + i] = (b2 + b5)>>6
+        result[2 * 8 + i] = (b4 + b3)>>6
+        result[3 * 8 + i] = (b6 + b1)>>6
+        result[4 * 8 + i] = (b6 - b1)>>6
+        result[5 * 8 + i] = (b4 - b3)>>6
+        result[6 * 8 + i] = (b2 - b5)>>6
+        result[7 * 8 + i] = (b0 - b7)>>6
     result = result.clip(0,255)
     return result
-'''
+
 def blocks_to_yuv(data,w,h):
     assert (len(data) % w*h) == 0
     assert w % 8 == 0
@@ -501,17 +530,10 @@ def blocks_to_yuv(data,w,h):
         y = 0
         x = 0
         yr = xr = 0
-        while (y < h):#and(z+xr < len(data)):
+        while (y < h):
             while(x < w):
                 i = 0
-                #print('i loop')
                 while i<8:
-                    #print("--")
-                    #print(result[zr + (y+i)*w + x : zr + (y+i)*w + x + 8])
-                    #print(data[z + xr: z + xr + 8])
-                    #print(f"i {i} x {x} y {y} z+xr {z+xr}" )
-                    i1 = zr + (y+i)*w + x
-                    i2 = z + xr
                     result[zr + (y+i)*w + x : zr + (y+i)*w + x + 8] = data[z + xr: z + xr + 8]
                     i = i + 1
                     xr = xr + 8
@@ -523,27 +545,30 @@ def blocks_to_yuv(data,w,h):
     return result
 
 def yuv_to_blocks(data,w,h):
-    assert (len(data) % (w*h + w*h//2)) == 0
+    assert (len(data) % w * h) == 0
     assert w % 8 == 0
     assert h % 8 == 0
-    result = np.zeros((len(data) + len(data) // 2,), dtype = np.uint8)
+    result = np.zeros((len(data) + len(data) // 2,), dtype=np.uint8)
     z = zr = 0
-    while (z < len(data)):
-        x = y = 0
+    print(len(data))
+    while (zr < len(data)):
+        y = 0
+        x = 0
         yr = xr = 0
-        while (x*w + y) < (w*h):
-            x = 0
-            while(x < w):
+        while (y < h):
+            while (x < w):
                 i = 0
-                while i<8:
-                    result[z + xr: z + xr + 8] = data[zr + (y+i)*w + x : zr + (y+i)*w + x + 8]
+                while i < 8:
+                    result[z + xr: z + xr + 8] = data[zr + (y + i) * w + x: zr + (y + i) * w + x + 8]
                     i = i + 1
                     xr = xr + 8
                 x = x + 8
-
+            x = 0
             y = y + 8
-        zr = zr + w*h + w*h//2
-        z = z + w*h
+        zr = zr + w * h + w * h // 2
+        z = z + w * h
+        if z == 51200:
+            pass
     return result
 
 '''
@@ -604,36 +629,55 @@ def cell_to_core(cell,size,core):
 def cell_to_dct(data,size,core):
     result = np.array(data,dtype=np.int32)
     result = result[:] * 2 * core
-    result = result[:] // ( (1 << (size-1)))
+    result = result[:] // ( (1 << (size))-1)
     result = result[:] - core
     return result
 
 def dct_to_cell(data,size,core):
     result = np.array(data, dtype=np.float32)
     result = result[:] + core
-    result = result[:] *  ( (1 << (size-1)))
+    result = result[:] *  ( (1 << (size))-1)
     result = result[:] / (2 * core)
-    result = np.clip(result,0,size-1)
+    result = np.clip(result,0,(1<<size)-1)
     result = np.round(result)
     result = result.astype(np.int32)
     return result
 
 def dct_to_block(data, core_middle, count):
+    assert ((data.shape[0] % count) == 0)
     result = np.zeros((data.shape[0]*64//count), dtype=np.uint8)
-    dct = np.zeros((data.shape[0]*64//count), dtype=np.int32)
+    dct = np.zeros(64, dtype=np.int32)
     assert (len(data) % count) == 0
     for i in range(len(data)//count):
         dct[0] = core_middle
         result[64 * i] = core_middle
         for j in range(count):
-            ii = i*count + j
-            iii = 64*i+j+1
-            result[64*i+j+1] = data[i*count + j]
+            #ii = i*count + j
+            #iii = 64*i+j+1
+            #result[64*i+j+1] = data[i*count + j]
             dct[j+1] = data[i*count + j]
-        block = IDCT8x8(dct)
+        dct2 = dct[_snake_encode8_plain_np]
+        block = IDCT8x8x264(dct2)
         result[64*i:64*i+64] = block[:]
     return result
 
+def block_to_dct(data,count):
+    assert ((data.shape[0] % 64)==0)
+    result = np.zeros((data.shape[0] * count // 64), dtype=np.int32)
+    idct = np.empty(count,dtype=np.int32)
+    for i in range(len(data)//64):
+        a = data[64*i:64*i+64]
+        b = DCT8x8x264(a)
+        c = b[_snake_decode8_plain_np]
+        #dct = DCT8x8(data[64*i:64*i+64])[_snake_decode8_plain_np]
+        d = c
+        dct = d[1: 1+count]
+        #result[i*count: (i+1)*count] = dct[1: 1+count]
+        # value shift compensation
+        dct = dct# + dct // 7
+        result[i * count: (i + 1) * count] = dct
+
+    return result
 
 
 
@@ -645,8 +689,8 @@ generate possible modes
   size - "alphabet" size
   volume - total data per dct block
 '''
-def generate_dct_modes_list():
-    modes = []
+def make_dct_match_list():
+    modes = {[]:'origin'}
     cnt = 0
     print("Generating possible modes:")
     np_dct = np.empty((64,),dtype=np.int16)
@@ -753,61 +797,119 @@ def array_print(data,x):
         f.write(f"{i}  {data[i]}\n")
     f.close()
 
-a = np.arange(255,dtype=np.uint8)
-#a.tofile('test',format("bw"))
+def array_save(data,x):
+    f = open(f"save 0{x*10}.txt","bw")
+    f.write(memoryview(data))
+    f.close()
+
+def array_saved(data,x):
+    f = open(f"saved 0{x*10}.txt","bw")
+    f.write(memoryview(data))
+    f.close()
+
+def array_debug_compare(x,y,s):
+    f = open(f"debug 0{s}.txt", "w")
+    m = x.shape[0] if x.shape[0] < y.shape[0] else y.shape[0]
+    for i in range(m):
+        f.write(f"i{i}  a{int(x[i])-int(y[i])}  x{x[i]}  y{y[i]}\n")
+    f.close()
+
+def array_read():
+    return np.fromfile(open("decode.yuv","rb"),dtype=np.uint8)
 
 
-
-cells_per_block = 1
+cells_per_block = 12
 cells_size = 1
-w = 8*2
-h = 8*2
+w = 8*20
+h = 8*20
 yuv_size = w*h + w*h//2
 middle, core_val = dct_core_init8(cells_size,cells_per_block)
 
-#data = np.arange(0,255,dtype=np.uint8)
-data = np.zeros((3,),dtype=np.uint8)
-data[0] = 170
-data[1] = 256-170
-data[2] = 212
-data = np.tile(data,500)
+
+np.random.seed(2)
+data = np.random.randint(0,255,600,dtype=np.uint8)
+data_rs = bytes_to_rs(data)
+data_unrs = bytes_from_rs(data_rs)
+array_save(data,1)
+data01 = data
+#data = bytes_to_rs(data)
+data_size = len(data)
+
 data = bytes_to_bits(data)
+array_save(data,2)
+data02 = data
 
 buf = Feeder(cells_size)
 buf.push(data)
 buf.close()
 data = bits_to_cell(next(buf.iter()),cells_size)
+array_save(data,3)
+data03 = data
 
 data = cell_to_dct(data,cells_size,core_val)
+array_save(data,4)
+data04 = data
 
-array_print(data,'7dct')
+#array_print(data,'7dct')
 
 buf = Feeder(cells_per_block,dtype=np.int32)
 buf.push(data)
 buf.close()
 data = dct_to_block(next(buf.iter()), middle, cells_per_block)
+array_save(data,5)
+data05 = data
 
-array_print(data,'8block')
+#array_print(data,'8block')
 
 buf = Feeder( w*h )
 buf.push(data)
 buf.close()
-
 data = next(buf.iter())
-array_print(data,'80block')
-
 data = blocks_to_yuv(data,w,h)
+array_save(data,6)
+data06 = data
+
+#data = np.fromfile(open("save 060.txt","rb"),dtype=np.uint8)
 
 
-f = open('text','bw')
-f.write(memoryview(data))
-f.close()
-
-array_print(data,'9end')
+#array_print(data,'9end')
 
 
+data = array_read()
+array_saved(data,6)
+data16 = data
+array_debug_compare(data06,data16,6)
 
-z = 2
+data = yuv_to_blocks(data,w,h)
+array_saved(data,5)
+data15 = data
+array_debug_compare(data05,data15,5)
+
+data = block_to_dct(data,cells_per_block)
+array_saved(data,4)
+data14 = data
+array_debug_compare(data04,data14,4)
+
+data = dct_to_cell(data,cells_size,core_val)
+array_saved(data,3)
+data13 = data
+array_debug_compare(data03,data13,3)
+
+data = cell_to_bits(data,cells_size)
+array_saved(data,2)
+data12 = data
+array_debug_compare(data02,data12,2)
+
+
+buf = Feeder(8,dtype=np.uint8)
+buf.push(data)
+buf.close()
+data = bits_to_bytes(next(buf.iter()))
+array_saved(data,1)
+#data = bytes_from_rs(data[:data_size])
+
+data11 = data
+array_debug_compare(data01,data11,1)
 
 '''class Buffer():
 
