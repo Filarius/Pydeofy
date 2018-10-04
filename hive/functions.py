@@ -7,9 +7,11 @@ from hive import fifo
 from math import ceil
 from scipy.fftpack import dctn,idctn
 from reedsolo import RSCodec
+import numba
 from array import array
 import itertools
-
+from functools import lru_cache
+from scipy.spatial import KDTree
 coder = RSCodec(50)
 
 s = bytearray(255)
@@ -555,11 +557,18 @@ def yuv_to_blocks(data,w,h):
         y = 0
         x = 0
         yr = xr = 0
-        while (y < h):
+        while (y < h)and( (zr + (y + 0) * w + x)<len(data)):
             while (x < w):
                 i = 0
                 while i < 8:
-                    result[z + xr: z + xr + 8] = data[zr + (y + i) * w + x: zr + (y + i) * w + x + 8]
+                    if (zr + (y + i) * w + x) > 3732471:
+                        zxc=2
+
+                    try:
+                        result[z + xr: z + xr + 8] = data[zr + (y + i) * w + x: zr + (y + i) * w + x + 8]
+                    except:
+                        print(f"{z + xr} {zr + (y + i) * w + x} {len(result)} {len(data)}")
+                        raise AttributeError
                     i = i + 1
                     xr = xr + 8
                 x = x + 8
@@ -579,11 +588,11 @@ def yuv_to_blocks(data,w,h):
 '''
 def dct_core_init8(cell_size, cell_count):
     t = np.ones((64,),dtype=np.int32)
-    t = t * 128
+    t = t * 255
     t = DCT8x8(t)
     t = IDCT8x8(t)
     t = DCT8x8(t)
-    middle = t[0]
+    middle = t[0]//2
     a = np.zeros((64,),dtype=np.int32)
     a[0] = middle
     i = 1
@@ -676,8 +685,46 @@ def block_to_dct(data,count):
         # value shift compensation
         dct = dct# + dct // 7
         result[i * count: (i + 1) * count] = dct
-
     return result
+
+def block_to_dct_compensated(data,count,cores):
+    assert ((data.shape[0] % 64)==0)
+    result = np.zeros((data.shape[0] * count // 64), dtype=np.int32)
+    idct = np.empty(count,dtype=np.int32)
+    for i in range(len(data)//64):
+        a = data[64*i:64*i+64]
+        b = DCT8x8x264(a)
+        core = cores[best_neighbor(cores, b)]
+        dct = core['dct']
+        result[i * count: (i + 1) * count] = dct
+    return result
+
+
+def dct_to_block_opt(data, count, cores):
+    dct = None
+
+    # function use global "dct" and "cores"
+    @lru_cache
+    def cached_dct_to_block(dct_tpl):
+        j = -1
+        for i in range(len(cores)):
+            if np.equal(dct,cores[i]['dct']):
+                j=i
+                break
+        if j == -1:
+            raise AttributeError
+        return cores[i]['block']
+    assert ((data.shape[0] % count) == 0)
+    result = np.zeros((data.shape[0] * 64 // count), dtype=np.uint8)
+    for i in range(len(data) // count):
+        dct = data[i*count: (i+1)*count]
+        tpl = tuple(dct)
+        block = cached_dct_to_block(tpl)
+        result[i*64:(i+1)*64] = block[:]
+    return result
+
+
+
 
 
 
@@ -689,8 +736,9 @@ generate possible modes
   size - "alphabet" size
   volume - total data per dct block
 '''
-def make_dct_match_list():
-    modes = {[]:'origin'}
+def generate_modes():
+    modes = []
+    cores = []
     cnt = 0
     print("Generating possible modes:")
     np_dct = np.empty((64,),dtype=np.int16)
@@ -704,18 +752,62 @@ def make_dct_match_list():
             np_dct[0] = middle
             flag = True
             for variant in itertools.permutations(range(size), count):
-                _ = list(map(lambda x: cell_to_core(x, size, core), variant))
+                #_ = list(map(lambda x: cell_to_core(x, size, core), variant))
                 __ = cell_to_dct(variant, size, core)
                 np_dct[1:1 + count] = __[:]
-                np_idct = IDCT8x8(np_dct)
-                np_dct2 = DCT8x8(np_idct)
+                np_idct = IDCT8x8x264(np_dct)
+                np_dct2 = DCT8x8x264(np_idct)
+
                 variant_2 = dct_to_cell(np_dct2[1:1 + count], size, core)
                 if not (variant == variant_2).all():
                     flag = False
                     break
             if flag:
-                print(f" count={count}  size={size}  volume={count*size}")
+                #print(f" count={count}  size={size}  volume={count*size}")
                 modes.append({'count': count, 'size': size, 'volume':count*size})
+    return modes
+
+#generate mapping list to compensate bad idct algorithm
+#@numba.njit
+def dct_corelist_generate(size,count,middle,max):
+    dat = list(range(1 << size))
+    temp = np.zeros(count,dtype=np.uint8)
+    cores = {'dct':[],"block":[],"dct2":[]}
+    for cells in itertools.combinations_with_replacement(dat,count):
+        dct = cell_to_dct(cells,size,max)
+        block = dct_to_block(dct,middle,count)
+        dct2 = block_to_dct(block,count)
+        cores['dct'].append(dct)
+        cores['block'].append(block)
+        cores['dct2'].append(dct2)
+    cores['block'] = np.array(cores['block'])
+    cores['tree'] = KDTree(cores['block'])
+    return cores
+
+def neighbor_distance(ref,sample):
+    #assert len(ref)==len(sample)
+    max = 0
+    for i in range(len(ref)):
+        a = abs(ref[i]-sample[i])
+        if a > max:
+            max = a
+    return max
+
+def best_neighbor(cores,sample):
+    min = 10000 # definitly biggest possible value
+    imin = -1
+    for i in range(len(cores)):
+        #print(f"{i} {len(cores)}")
+        val = neighbor_distance(cores[i]['dct_vid'],sample)
+        if min > val:
+            min = val
+            imin = i
+    if imin==-1:
+        raise AttributeError
+    return imin
+
+
+
 
 
 
@@ -807,27 +899,51 @@ def array_saved(data,x):
     f.write(memoryview(data))
     f.close()
 
-def array_debug_compare(x,y,s):
+def array_debug_compare(x,y,s,print_count=False):
     f = open(f"debug 0{s}.txt", "w")
     m = x.shape[0] if x.shape[0] < y.shape[0] else y.shape[0]
+    cnt = 0
     for i in range(m):
         f.write(f"i{i}  a{int(x[i])-int(y[i])}  x{x[i]}  y{y[i]}\n")
+        cnt += abs(int(x[i])-int(y[i]))
     f.close()
+    if print_count:
+        print("max distance ", cnt)
 
 def array_read():
     return np.fromfile(open("decode.yuv","rb"),dtype=np.uint8)
 
+#find cnt of errors at dct coeffs positions
+def check_valid_area_range_dct(data_ref, data_sample, cell_count):
+    max = 0
+    buf = np.zeros(cell_count, dtype=np.int32)
+    if len(data_ref) > len(data_sample):
+        max = len(data_sample)
+    else:
+        max = len(data_ref)
+    k=0
+    i=0
+    while i<max:
+        if data_ref[i] != data_sample[i]:
+            buf[k] = buf[k] + 1
+        i = i + 1
+        k = k + 1
+        if k == cell_count:
+            k=0
+    print(buf)
 
-cells_per_block = 12
+mode = 1
+cells_per_block = 6
 cells_size = 1
-w = 8*20
-h = 8*20
+w = 1280
+h = 720
 yuv_size = w*h + w*h//2
 middle, core_val = dct_core_init8(cells_size,cells_per_block)
-
-
+print("cores")
+#cores = dct_corelist_generate(cells_size,cells_per_block,middle,core_val)
+print("done cores")
 np.random.seed(2)
-data = np.random.randint(0,255,600,dtype=np.uint8)
+data = np.random.randint(0,255,450000,dtype=np.uint8)
 data_rs = bytes_to_rs(data)
 data_unrs = bytes_from_rs(data_rs)
 array_save(data,1)
@@ -871,7 +987,9 @@ data06 = data
 
 #data = np.fromfile(open("save 060.txt","rb"),dtype=np.uint8)
 
-
+print("encoding done")
+if mode == 0:
+    quit()
 #array_print(data,'9end')
 
 
@@ -885,20 +1003,25 @@ array_saved(data,5)
 data15 = data
 array_debug_compare(data05,data15,5)
 
+#data = block_to_dct_compensated(data,cells_per_block,cores)
 data = block_to_dct(data,cells_per_block)
 array_saved(data,4)
 data14 = data
 array_debug_compare(data04,data14,4)
 
+
 data = dct_to_cell(data,cells_size,core_val)
 array_saved(data,3)
 data13 = data
-array_debug_compare(data03,data13,3)
+array_debug_compare(data03,data13,3,True)
+
+
 
 data = cell_to_bits(data,cells_size)
 array_saved(data,2)
 data12 = data
 array_debug_compare(data02,data12,2)
+check_valid_area_range_dct(data02,data12,cells_per_block)
 
 
 buf = Feeder(8,dtype=np.uint8)
@@ -909,7 +1032,9 @@ array_saved(data,1)
 #data = bytes_from_rs(data[:data_size])
 
 data11 = data
+print("decoding done")
 array_debug_compare(data01,data11,1)
+
 
 '''class Buffer():
 
