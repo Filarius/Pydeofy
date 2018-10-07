@@ -525,32 +525,65 @@ def blocks_to_yuv(data,w,h):
     assert (len(data) % w*h) == 0
     assert w % 8 == 0
     assert h % 8 == 0
-    result = np.zeros((len(data)+ len(data)//2,),dtype=np.uint8)
+    #result = np.zeros((len(data)+ len(data)//2,),dtype=np.uint8)
+    result = np.zeros((len(data)+ len(data)//2,), dtype=np.uint8)
     z = zr = 0
     print(len(data))
     while (z < len(data)):
         y = 0
         x = 0
         yr = xr = 0
-        while (y < h):
+        while (y < h)and ((z + xr) < len(data)):
             while(x < w):
                 i = 0
                 while i<8:
-                    result[zr + (y+i)*w + x : zr + (y+i)*w + x + 8] = data[z + xr: z + xr + 8]
+                    try:
+                        result[zr + (y+i)*w + x : zr + (y+i)*w + x + 8] = data[z + xr: z + xr + 8]
+                    except:
+                        a=0
                     i = i + 1
                     xr = xr + 8
                 x = x + 8
             x = 0
             y = y + 8
-        zr = zr + w*h + w*h//2
-        z = z + w*h
+        #zr = zr + w*h + w*h//2
+        zr = zr + w * h
+        y = 0
+        x = 0
+        while (y < h//2)and ((z + xr) < len(data)):
+            while(x < w//2):
+                i = 0
+                while i<8:
+                    result[zr + (y+i)*(w//2) + x : zr + (y+i)*(w//2) + x + 8] = data[z + xr: z + xr + 8]
+                    i = i + 1
+                    xr = xr + 8
+                x = x + 8
+            x = 0
+            y = y + 8
+        zr = zr + (w * h) // 4
+        y = 0
+        x = 0
+        while (y < h//2)and ((z + xr) < len(data)):
+            while(x < w//2):
+                i = 0
+                while i<8:
+                    result[zr + (y+i)*(w//2) + x : zr + (y+i)*(w//2) + x + 8] = data[z + xr: z + xr + 8]
+                    i = i + 1
+                    xr = xr + 8
+                x = x + 8
+            x = 0
+            y = y + 8
+        zr = zr + (w * h) // 4
+
+        z = z + w*h + (w*h)//2
     return result
 
 def yuv_to_blocks(data,w,h):
     assert (len(data) % w * h) == 0
     assert w % 8 == 0
     assert h % 8 == 0
-    result = np.zeros((len(data) + len(data) // 2,), dtype=np.uint8)
+    #result = np.zeros((len(data) + len(data) // 2,), dtype=np.uint8)
+    result = np.zeros((len(data),), dtype=np.uint8)
     z = zr = 0
     print(len(data))
     while (zr < len(data)):
@@ -574,8 +607,55 @@ def yuv_to_blocks(data,w,h):
                 x = x + 8
             x = 0
             y = y + 8
-        zr = zr + w * h + w * h // 2
-        z = z + w * h
+
+
+        #zr = zr + w * h + w * h // 2
+        zr = zr + w * h
+        y = 0
+        x = 0
+        while (y < h//2)and( (zr + (y + 0) * w//2 + x)<len(data)):
+            while (x < w//2):
+                i = 0
+                while i < 8:
+                    if (zr + (y + i) * w + x) > 3732471:
+                        zxc=2
+
+                    try:
+                        result[z + xr: z + xr + 8] = data[zr + (y + i) * (w//2) + x: zr + (y + i) * (w//2) + x + 8]
+                    except:
+                        print(f"{z + xr} {zr + (y + i) * w + x} {len(result)} {len(data)}")
+                        raise AttributeError
+                    i = i + 1
+                    xr = xr + 8
+                x = x + 8
+            x = 0
+            y = y + 8
+
+        zr = zr + (w * h)//4
+        y = 0
+        x = 0
+
+        while (y < h//2)and( (zr + (y + 0) * w//2 + x)<len(data)):
+            while (x < w//2):
+                i = 0
+                while i < 8:
+                    if (zr + (y + i) * w + x) > 3732471:
+                        zxc=2
+
+                    try:
+                        result[z + xr: z + xr + 8] = data[zr + (y + i) * (w//2) + x: zr + (y + i) * (w//2) + x + 8]
+                    except:
+                        print(f"{z + xr} {zr + (y + i) * w + x} {len(result)} {len(data)}")
+                        raise AttributeError
+                    i = i + 1
+                    xr = xr + 8
+                x = x + 8
+            x = 0
+            y = y + 8
+
+        zr = zr + (w * h) // 4
+
+        z = z + w * h + (w * h)//2
         if z == 51200:
             pass
     return result
@@ -693,9 +773,10 @@ def block_to_dct_compensated(data,count,cores):
     idct = np.empty(count,dtype=np.int32)
     for i in range(len(data)//64):
         a = data[64*i:64*i+64]
-        b = DCT8x8x264(a)
-        core = cores[best_neighbor(cores, b)]
-        dct = core['dct']
+        b = DCT8x8x264(a)[1:count+1]
+        ##cores[best_neighbor(cores, b)]
+        #dct = core['dct']
+        dct = best_neighbor(cores,b)
         result[i * count: (i + 1) * count] = dct
     return result
 
@@ -780,8 +861,8 @@ def dct_corelist_generate(size,count,middle,max):
         cores['dct'].append(dct)
         cores['block'].append(block)
         cores['dct2'].append(dct2)
-    cores['block'] = np.array(cores['block'])
-    cores['tree'] = KDTree(cores['block'])
+    cores['dct2'] = np.array(cores['dct2'])
+    cores['tree'] = KDTree(cores['dct2'])
     return cores
 
 def neighbor_distance(ref,sample):
@@ -794,17 +875,9 @@ def neighbor_distance(ref,sample):
     return max
 
 def best_neighbor(cores,sample):
-    min = 10000 # definitly biggest possible value
-    imin = -1
-    for i in range(len(cores)):
-        #print(f"{i} {len(cores)}")
-        val = neighbor_distance(cores[i]['dct_vid'],sample)
-        if min > val:
-            min = val
-            imin = i
-    if imin==-1:
-        raise AttributeError
-    return imin
+    _,i = cores['tree'].query(sample,1)
+    result = cores['dct'][i]
+    return result
 
 
 
@@ -916,6 +989,7 @@ def array_read():
 #find cnt of errors at dct coeffs positions
 def check_valid_area_range_dct(data_ref, data_sample, cell_count):
     max = 0
+    sum = 0
     buf = np.zeros(cell_count, dtype=np.int32)
     if len(data_ref) > len(data_sample):
         max = len(data_sample)
@@ -926,21 +1000,26 @@ def check_valid_area_range_dct(data_ref, data_sample, cell_count):
     while i<max:
         if data_ref[i] != data_sample[i]:
             buf[k] = buf[k] + 1
+            sum = sum + 1
         i = i + 1
         k = k + 1
         if k == cell_count:
             k=0
     print(buf)
+    print(f"{sum} errors from {max}")
+    print(f"error % {100*sum/max}")
 
 mode = 1
-cells_per_block = 6
+cells_per_block = 4
 cells_size = 1
 w = 1280
 h = 720
-yuv_size = w*h + w*h//2
+#yuv_size = w*h + w*h//2
 middle, core_val = dct_core_init8(cells_size,cells_per_block)
 print("cores")
-#cores = dct_corelist_generate(cells_size,cells_per_block,middle,core_val)
+
+cores = dct_corelist_generate(cells_size,cells_per_block,middle,core_val)
+
 print("done cores")
 np.random.seed(2)
 data = np.random.randint(0,255,450000,dtype=np.uint8)
@@ -997,24 +1076,26 @@ data = array_read()
 array_saved(data,6)
 data16 = data
 array_debug_compare(data06,data16,6)
+print(6)
 
 data = yuv_to_blocks(data,w,h)
 array_saved(data,5)
 data15 = data
 array_debug_compare(data05,data15,5)
+print(5)
 
 #data = block_to_dct_compensated(data,cells_per_block,cores)
 data = block_to_dct(data,cells_per_block)
 array_saved(data,4)
 data14 = data
 array_debug_compare(data04,data14,4)
-
+print(4)
 
 data = dct_to_cell(data,cells_size,core_val)
 array_saved(data,3)
 data13 = data
 array_debug_compare(data03,data13,3,True)
-
+print(3)
 
 
 data = cell_to_bits(data,cells_size)
@@ -1022,7 +1103,7 @@ array_saved(data,2)
 data12 = data
 array_debug_compare(data02,data12,2)
 check_valid_area_range_dct(data02,data12,cells_per_block)
-
+print(2)
 
 buf = Feeder(8,dtype=np.uint8)
 buf.push(data)
@@ -1030,11 +1111,12 @@ buf.close()
 data = bits_to_bytes(next(buf.iter()))
 array_saved(data,1)
 #data = bytes_from_rs(data[:data_size])
+print(1)
 
 data11 = data
 print("decoding done")
 array_debug_compare(data01,data11,1)
-
+print(0)
 
 '''class Buffer():
 
