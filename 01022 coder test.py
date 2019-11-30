@@ -2,13 +2,13 @@ import numpy as np
 
 from keras.models import Model
 from keras.layers import Input,Dense,Conv2D,Conv2DTranspose,Reshape,BatchNormalization,Flatten,MaxPool2D,Concatenate,UpSampling2D,Dropout,LeakyReLU
-from keras.layers import Subtract,Add,Lambda
+from keras.layers import Subtract,Add,GaussianNoise,Lambda
 from keras.optimizers import Adam
 import keras.optimizers as optims
 from keras.metrics import Accuracy
 from keras.activations import relu,sigmoid,tanh,softmax
 import keras.activations as act
-from keras.losses import mse,categorical_crossentropy,binary_crossentropy
+from keras.losses import mse
 import keras.losses
 from keras.preprocessing.image import ImageDataGenerator
 from keras.callbacks import Callback,TensorBoard
@@ -18,17 +18,35 @@ import keras.backend as K
 w = 1920
 h = 1080
 h_t = 864 # 1080*0.8
+fps = 40
+seconds = 60
+batch = 1
+frame_cnt = 40#seconds*fps
+bits_per_input =10
+samples_per_frame = w*h//64
+
+
+
+w = 1920
+h = 1080
+h_t = 864 # 1080*0.8
 fps = 60
 seconds = 60
 batch = 1
-bits_per_input = 8
-ones_count = 1
-samples_per_frame = w*h//64
-frame_cnt = 40
+bits_per_input = 16
+ones_count = 2
 
-import multihotencoding
-coder = multihotencoding.MultiHotEncoding(2**bits_per_input,ones_count=ones_count)
+from binary_encoder import BinaryCoder
+coder = BinaryCoder(2**bits_per_input)
 width = coder.get_width()
+
+#from sklearn.preprocessing.label import LabelBinarizer
+#lcoder = LabelBinarizer(sparse_output=True)
+#width = 2**bits_per_input
+
+#lcoder.fit(range(width))
+
+
 #функции точности, показывают отклонение от идеала - максимальное, среднее, и разброс
 def pix_max(x,y):
     return K.max(K.abs(x-y)*255,-1)
@@ -45,6 +63,7 @@ def bit_mean_abs(x,y):
 def bit_std(x,y):
     return K.std((x-y),-1)
 
+
 class WeightsSaver(Callback):
   def __init__(self, N):
     self.N = N
@@ -54,16 +73,20 @@ class WeightsSaver(Callback):
     if self.epoch % self.N == 0:
         self.model
         print('saving ',epoch)
-        #name = ('a%04d.hdf5') % self.epoch
-        name = ('a.hdf5')
+        name = ('weights%04d.hdf5') % self.epoch
         self.model.save_weights(name)
-        #name = ('weights%04d_1.hdf5') % self.epoch
-        #self.model.save_weights(name)
     self.epoch += 1
 
 
 
-
+def Sampler(x):
+    mean = K.mean(x)
+    std = K.abs(mean-0.5)*1
+    #x = GaussianNoise(std)(x)
+    x = x
+    #x = K.clip(x,0.0,1.0)
+    #x = K.clip(x,0,1)
+    return Lambda(lambda x:K.clip(x,0,1))(x)
 
 def make_model():
     # encoder start
@@ -72,7 +95,6 @@ def make_model():
     enc_pipe.append(Concatenate(name='enc_cnc'))
     #enc_pipe.append(Flatten(name='enc_flat'))
     enc_pipe.append(Dense(64 * 2, activation=relu, name='enc_d1'))
-    #enc_pipe.append(Dense(64 * 2, activation=relu, name='enc_d2'))
     enc_pipe.append(Dense(8 * 8, activation=relu, name='enc_d3'))
     enc_pipe.append(Reshape((8, 8, 1), name='enc_r'))
     enc_lst = []
@@ -80,7 +102,7 @@ def make_model():
         x = inp = [enc_inps[i], enc_inps[i+9]]
         for layer in enc_pipe:
             x = layer(x)
-        x = Lambda(lambda x:K.clip(x,0,1))(x)
+        x = Sampler(x)
         enc_lst.append((inp, x))
     encoder = Model(inputs=enc_lst[0][0], outputs=enc_lst[0][1], name='encoder')
     enc_inputs = [enc_lst[x][0] for x in range(18)]
@@ -91,25 +113,7 @@ def make_model():
 
     # noiser start
     noiser_inputs = [Input((8, 8), name='noi_in{0}'.format(i)) for i in range(9 * 2)]
-    '''
-    pipe = []
-    pipe.append(Reshape((8, 8, 1), name='noi_r'))
-    pipe.append(Conv2D(8, 3, strides=1, padding='same', activation=relu, name='noi_c01'))
-    pipe.append(BatchNormalization())
-    pipe.append(MaxPool2D((2, 2), strides=2, padding='same'))
-    pipe.append(Conv2D(16, 3, strides=1, padding='same', activation=relu, name='noi_c02'))
-    pipe.append(BatchNormalization())
-    pipe.append(MaxPool2D((2, 2), strides=2, padding='same'))
-    pipe.append(Conv2D(32, 3, strides=1, padding='same', activation=relu, name='noi_c03'))
-    pipe.append(BatchNormalization())
-    pipe.append(MaxPool2D((2, 2), strides=2, padding='same'))
-    pipe_outputs = []
-    for input in noiser_inputs:
-        x = input
-        for layer in pipe:
-            x = layer(x)
-        pipe_outputs.append(x)
-    '''
+
     # x = [Concatenate(axis=1, name='enc_c1_{y}')(noiser_inps[y:y+3]) for y in range(0,18,3))
     x = Concatenate(axis=1, name='noi_c')(noiser_inputs)
     x = Flatten(name='noi_f')(x)
@@ -117,11 +121,10 @@ def make_model():
     x = Dense(64 * 8, name='noi_d2', activation=relu)(x)
     #x = Dense(64 * 2,name='noi_d3',activation=relu)(x)
     #x = Dense(64 * 2, name='noi_d31', activation=relu)(x)
-    n_output = Dense(8 * 8, name='noi_d4', activation=sigmoid)
-    x = n_output(x)
+    x = Dense(8 * 8, name='noi_d4', activation=sigmoid)(x)
     noiser_output = x = Reshape((8, 8), name='noi_r')(x)
     noiser = Model(inputs=noiser_inputs, outputs=noiser_output, name='noiser')
-    print(noiser.summary())
+    #print(noiser.summary())
     # noiser end
 
     # decoder start
@@ -135,83 +138,62 @@ def make_model():
     #print(decoder.summary())
     # decoder end
 
-    def sampler(x):
-        #mean = K.mean(x)
-        #std = K.abs(mean - 0.5)*300
-        #x = GaussianNoise(std)(x)
-        x = K.clip(x,0,1)
-        return x
-
-
-
     # autoencoder start
     x = enc_inps
     y = enc_outputs
     y = noiser(y)
-    #y = Lambda(sampler)(y)
+    y = Sampler(y)
     y = decoder(y)
     autoencoder = Model(inputs=x, outputs=y, name='autoencoder')
     #print(autoencoder.summary())
-
-
-
-    def wrapper(layer):
-        def my_loss(x,y):
-            bc = binary_crossentropy(x,y)
-            mean = K.mean(n_output.output)
-            return bc+mean
-        return my_loss
 
     result = {'e': encoder,
               'd': decoder,
               'n': noiser,
               'a': autoencoder}
-
-    #K.abs(mean-0.5) + K.abs(std-0.2)
-
     return result
 
 
 models = make_model()
 #models['e'].load_weights('encoder 20191029 v2.hdf5')
 models['e'].load_weights('e.hdf5')
-models['d'].load_weights('d.hdf5')
 from ffmpegwrapper import ffmpeg
 
-path = 'ffmpeg -y -f rawvideo -pix_fmt gray -s:v 1920x1080 -r 60 -i - -c:v libx264 -preset fast -crf 24 ttest.mp4'
+path = 'ffmpeg -y -f rawvideo -pix_fmt gray -s:v 1920x1080 -r 60 -i - -c:v libx264 -preset fast -crf 22 testt.mp4'
 
 ff = ffmpeg(path,use_stdin=True,print_to_console=True)
 ff.start()
+import time
+time.sleep(1)
 
 frame_front = np.zeros((h, w), dtype=np.uint8)
 
-from . import multihotencoding
 def enc_samples(cnt):
   global bits_per_input
   import random
-  x = np.random.randint(256,size=cnt)
-  ret = coder.encode(x)
-  #x = np.zeros(shape=(cnt, size))
-  #for i in range(0,cnt):
-  #        k = random.randint(0,size-1)
-  #        x[i,k] = 1.0
-  return ret
+  size = 2**bits_per_input
+  mem = None
+  x = np.random.randint(0,2**bits_per_input,size=cnt,dtype=coder.get_dtype())
+  y = coder.encode(x)
+  return y
 
 def frame_samples_gen(cnt):
     ENC_CNT = 1024*(32+8)
     encs = enc_samples(ENC_CNT)
     import pickle
-    #with open('random.dat',mode='wb') as f:
-    #   pickle.dump(encs,f)
-    with open('random.dat',mode='rb') as f:
-        encs = pickle.load(f)
+    with open('random.dat',mode='wb') as f:
+       pickle.dump(encs,f)
+
+    #encs = encs.toarray()
+    #with open('random.dat',mode='rb') as f:
+    #    encs = pickle.load(f)
     ind = 1
     dx = 1
-    frame_now = np.empty((samples_per_frame, width), dtype=np.float)
-    frame_before = np.zeros((samples_per_frame, width), dtype=np.float)
+    frame_now = np.empty((samples_per_frame, width), dtype=np.int)
+    frame_before = np.zeros((samples_per_frame, width ), dtype=np.int)
     for k in range(cnt):
         for i in range(samples_per_frame):
-            frame_now[i, :] = encs[ind]
+            frame_now[i, :] = encs[ind,:]
             ind += dx
             if ind == ENC_CNT:
                 ind = ENC_CNT - 2
@@ -223,7 +205,6 @@ def frame_samples_gen(cnt):
         temp = frame_before
         frame_before = frame_now
         frame_now = temp  # UNSAFE ! BEWARE
-        #frame_now = np.empty((samples_per_frame, width), dtype=np.float)
 
 frame = np.zeros((h, w), dtype=np.uint8)
 
@@ -238,6 +219,26 @@ def do_frame(frame,predict):
             frame[i*8 : i*8 + 8, j*8 : j*8 + 8] = predict[i * (w // 8) + j, :, :, 0]
 
 cnt = 0
+
+graph =  True
+graph =  not True
+if graph:
+    import matplotlib.pyplot as plt
+    k=-1
+    for x in frame_samples_gen(frame_cnt):
+           for j in range(x[0].shape[0]):
+                k += 1
+                xq = [x[0][j:j+1],x[1][j:j+1]]
+                if k%(8*8) ==0:
+                    if k > 0:
+                        plt.show()
+                        #exit(0)
+                    fig, axes = plt.subplots(8,8)
+                yq = models['e'].predict(xq)[0,:,:,0]
+                print(np.min(yq),np.max(yq),np.mean(yq))
+                axes[(k%(8*8))//8,k%8].imshow(yq,cmap='gray')
+                axes[(k % (8 * 8)) // 8, k % 8].axis('off')
+
 for x in frame_samples_gen(frame_cnt):
     predict = models['e'].predict(x)
     predict = np.clip(predict, a_min=0.0, a_max=1.0)
